@@ -1,0 +1,49 @@
+import React,{useEffect,useMemo,useState} from 'react';
+import{createRoot}from'react-dom/client';
+import { initializeApp, getApps } from 'firebase/app';
+import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import{Plus,Search,Image,Video,Type,Copy,Edit3,Trash2,ArrowRight,Cloud,Upload,X,Save,ExternalLink,Link as LinkIcon}from'lucide-react';
+import'./style.css';
+const defaultConfig = (()=>{try{return JSON.parse(localStorage.getItem('dc_firebase')||'{}')}catch{return {}}})();
+const firebaseFields=['apiKey','authDomain','projectId','storageBucket','messagingSenderId','appId'];
+function App(){
+ const [config,setConfig]=useState(defaultConfig),[formConfig,setFormConfig]=useState(defaultConfig);
+ const [db,setDb]=useState(null),[storage,setStorage]=useState(null),[status,setStatus]=useState('offline'),[projects,setProjects]=useState([]);
+ const [search,setSearch]=useState(''),[filter,setFilter]=useState('Todos'),[editing,setEditing]=useState(null),[showSetup,setShowSetup]=useState(!defaultConfig.projectId),[notice,setNotice]=useState('');
+ const ping=s=>{setNotice(s);setTimeout(()=>setNotice(''),2600)};
+ const connect=async(c=formConfig)=>{if(firebaseFields.some(k=>!c[k])){ping('Preencha os dados do app Firebase.');return}try{const appName='dani-creator-'+c.projectId;const app=getApps().find(a=>a.name===appName)||initializeApp(c,appName);const firestore=getFirestore(app),bucket=getStorage(app);localStorage.setItem('dc_firebase',JSON.stringify(c));setConfig(c);setDb(firestore);setStorage(bucket);setShowSetup(false);setStatus('syncing')}catch(e){ping('Não conectou: '+e.message)}};
+ useEffect(()=>{if(config.projectId)connect(config)},[]);
+ useEffect(()=>{if(!db)return;setStatus('syncing');const q=query(collection(db,'creator_projects'),orderBy('updated_at','desc'));const unsub=onSnapshot(q,snap=>{setProjects(snap.docs.map(d=>({id:d.id,...d.data()})));setStatus('online')},err=>{setStatus('offline');ping('Falha na nuvem: '+err.message)});return()=>unsub()},[db]);
+ const filtered=useMemo(()=>projects.filter(p=>(p.title+' '+p.description+' '+p.category).toLowerCase().includes(search.toLowerCase())&&(filter==='Todos'||(filter==='Imagem + Vídeo'&&p.image_prompts?.some(Boolean)&&p.video_prompts?.some(Boolean))||(filter==='Vídeo'&&p.video_prompts?.some(Boolean))||(filter==='Texto'&&p.text_prompts?.some(Boolean)))),[projects,search,filter]);
+ const blank=()=>({title:'',description:'',category:'Geral',cover_url:'',image_prompts:['','',''],video_prompts:['','',''],text_prompts:['','','']});
+ const save=async p=>{if(!db){ping('Conecte o Firebase para salvar e sincronizar.');return}if(!p.title.trim()){ping('Dê um nome ao projeto.');return}const payload={title:p.title,description:p.description,category:p.category,cover_url:p.cover_url,image_prompts:p.image_prompts,video_prompts:p.video_prompts,text_prompts:p.text_prompts,updated_at:new Date().toISOString()};try{if(p.id)await updateDoc(doc(db,'creator_projects',p.id),payload);else await addDoc(collection(db,'creator_projects'),payload);setEditing(null);ping('Projeto salvo e sincronizado!')}catch(e){ping(e.message)}};
+ const upload=async file=>{if(!storage)throw new Error('Conecte o Firebase primeiro');const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,'_');const fileRef=ref(storage,`references/${Date.now()}-${safe}`);await uploadBytes(fileRef,file);return await getDownloadURL(fileRef)};
+ const del=async id=>{if(!confirm('Excluir este projeto para todos que usam o link?'))return;try{await deleteDoc(doc(db,'creator_projects',id));ping('Projeto excluído para todos.')}catch(e){ping(e.message)}};
+ const copy=async t=>{try{await navigator.clipboard.writeText(t||'');ping('Prompt copiado!')}catch{ping('Não foi possível copiar neste navegador.')}};
+ const share=()=>{navigator.clipboard?.writeText(location.href);ping('Link do aplicativo copiado!')};
+ return <main className="shell">
+ <header className="top"><div className="brand"><div className="logo">DC</div><div><b>DANI CREATOR</b><small>Prompts prontos para criar conteúdo</small></div></div><div className="head-actions"><span className={'sync '+status}><i/>{status==='online'?'Sincronizado':status==='syncing'?'Sincronizando':'Sem conexão'}</span><button className="iconbtn" onClick={share} title="Compartilhar link"><LinkIcon/></button><button className="iconbtn" onClick={()=>setShowSetup(true)} title="Configurar nuvem"><Cloud/></button></div></header>
+ <section className="hero"><p>Olá, criadora 👋</p><h1>Escolha uma ferramenta e crie conteúdo que <em>chama atenção</em></h1></section>
+ <div className="search"><Search/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Buscar ferramenta, categoria..."/></div>
+ <nav className="filters">{['Todos','Imagem + Vídeo','Vídeo','Texto'].map(f=><button key={f} className={filter===f?'active':''} onClick={()=>setFilter(f)}>{f}</button>)}</nav>
+ <section className="cards"><button className="add-card" onClick={()=>setEditing(blank())}><span><Plus/></span><b>Adicionar novo prompt</b><small>Crie um projeto com seus prompts</small></button>
+ {filtered.map(p=><article className="project" key={p.id}><div className="cover">{p.cover_url?(p.cover_url.match(/\.(mp4|webm|mov)(\?|$)/i)?<video src={p.cover_url} controls/>:<img src={p.cover_url}/>):<div className="cover-placeholder"><span>DC</span><b>{p.title}</b></div>}<span className="cover-tag">{p.category||'GERAL'}</span></div><div className="project-body"><small className="pink">{p.category||'PROJETO'}</small><h2>{p.title}</h2><p>{p.description}</p><div className="counts"><span>{p.image_prompts?.filter(Boolean).length||0} prompts de imagem</span><span>{p.video_prompts?.filter(Boolean).length||0} prompts de vídeo</span></div><div className="quick">{(p.image_prompts||[]).map((v,i)=>v&&<button key={'i'+i} onClick={()=>copy(v)}>Imagem {i+1} <Copy/></button>)}{(p.video_prompts||[]).map((v,i)=>v&&<button key={'v'+i} onClick={()=>copy(v)}>Vídeo {i+1} <Copy/></button>)}</div><div className="actions"><button className="edit" onClick={()=>setEditing({...p})}><Edit3/> Editar</button><button className="delete" onClick={()=>del(p.id)} title="Excluir"><Trash2/></button></div><button className="view" onClick={()=>setEditing({...p})}>VER E COPIAR PROMPTS <ArrowRight/></button></div></article>)}</section>
+ {!filtered.length&&<div className="empty">Nenhum projeto encontrado. Adicione seu primeiro prompt! 💗</div>}
+ <footer><Cloud size={15}/> Seus projetos ficam salvos no Firebase e sincronizados em tempo real.</footer>
+ {editing&&<Editor project={editing} setProject={setEditing} onClose={()=>setEditing(null)} onSave={save} upload={upload} copy={copy}/>}
+ {showSetup&&<div className="overlay"><div className="modal setup"><button className="close" onClick={()=>setShowSetup(false)}><X/></button><h2>Conectar sincronização</h2><p>Informe uma vez os dados do aplicativo Web do Firebase. Depois, este navegador conecta automaticamente.</p>{firebaseFields.map(k=><React.Fragment key={k}><label>{k}</label><input value={formConfig[k]||''} onChange={e=>setFormConfig(x=>({...x,[k]:e.target.value}))} placeholder={k}/></React.Fragment>)}<button className="primary full" onClick={()=>connect()}>Conectar automaticamente</button><small>Use apenas a configuração pública do app Web. Nunca coloque credenciais privadas.</small></div></div>}
+ {notice&&<div className="toast">{notice}</div>}
+ </main>
+}
+function Editor({project,setProject,onClose,onSave,upload,copy}){
+ const [p,setP]=useState({...project}),[busy,setBusy]=useState(false);
+ const upd=(k,v)=>setP(x=>({...x,[k]:v})),arr=(k,i,v)=>setP(x=>({...x,[k]:x[k].map((a,j)=>i===j?v:a)}));
+ const media=async f=>{if(!f)return;setBusy(true);try{upd('cover_url',await upload(f))}catch(e){alert(e.message)}finally{setBusy(false)}};
+ const sections=[['image_prompts','Prompts de imagem',Image],['video_prompts','Prompts de vídeo',Video],['text_prompts','Prompts de texto',Type]];
+ return <div className="overlay"><div className="modal editor"><div className="modal-head"><div><small className="pink">DANI CREATOR</small><h2>{p.id?'Editar projeto':'Novo projeto'}</h2></div><button className="close" onClick={onClose}><X/></button></div>
+ <label>Nome do projeto</label><input value={p.title} onChange={e=>upd('title',e.target.value)} placeholder="Ex.: Vídeo UGC hiper realista"/><label>Categoria</label><input value={p.category||''} onChange={e=>upd('category',e.target.value)} placeholder="Ex.: Moda, Beleza, Casa..."/><label>Descrição</label><textarea value={p.description||''} onChange={e=>upd('description',e.target.value)} placeholder="Descreva este conjunto de prompts..."/><label>Foto ou vídeo de referência (opcional)</label><div className="upload"><input type="file" accept="image/*,video/*" onChange={e=>media(e.target.files?.[0])}/>{p.cover_url&&<a href={p.cover_url} target="_blank">Ver mídia <ExternalLink size={14}/></a>}{busy&&'Enviando...'}</div>
+ {sections.map(([k,title,Icon])=><section className="prompt-section" key={k}><h3><Icon/> {title} <small>(até 3)</small></h3>{[0,1,2].map(i=><div className="prompt-field" key={i}><div className="field-head"><b>{title.slice(0,-1)} {i+1}</b><button onClick={()=>copy(p[k][i])}><Copy/> Copiar</button></div><textarea value={p[k][i]||''} onChange={e=>arr(k,i,e.target.value)} placeholder={`Cole aqui o ${title.toLowerCase()} ${i+1}...`}/></div>)}</section>)}
+ <div className="modal-actions"><button className="secondary" onClick={onClose}>Cancelar</button><button className="primary" onClick={()=>onSave(p)}><Save/> Salvar e sincronizar</button></div></div></div>
+}
+createRoot(document.getElementById('root')).render(<App/>);
