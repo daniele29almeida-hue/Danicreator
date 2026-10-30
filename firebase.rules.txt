@@ -1,0 +1,19 @@
+FIRESTORE RULES (Firebase Console > Firestore Database > Rules)
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /creator_projects/{projectId} {
+      allow read, create, update, delete: if true;
+    }
+  }
+}
+
+STORAGE RULES (Firebase Console > Storage > Rules)
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /references/{fileName} {
+      allow read, write: if true;
+    }
+  }
+}
